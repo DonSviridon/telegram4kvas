@@ -3,3 +3,7 @@ token = 'insertAPI'  # API ключ бота, полученный от @BotFath
 usernames = ['']
 #userid = [284932628, 284728289] Или Ваш ID(или несколько) без кавычек, необязательно вводить и логин и ID, можно что-то одно
 userid = []
+router_ip = '192.168.0.1'
+router_port = '222'
+router_password = 'keenetic'
+flag_docker = True

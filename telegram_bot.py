@@ -210,6 +210,17 @@ def custom_command_prompt(message: types.Message):
         bot.send_message(message.chat.id, "Произошла ошибка, попробуйте позже.")
 
 
+def if_docker(command):
+    router_ip = telegram_bot_config.router_ip
+    router_port = telegram_bot_config.router_port
+    router_password = telegram_bot_config.router_password
+    flag_docker = telegram_bot_config.flag_docker
+    if flag_docker == True:
+        return f"sshpass -p '{router_password}' ssh -p {router_port} root@{router_ip} {command}"
+    else:
+        return command
+
+
 def clean_string(text: str) -> str:
     return (
         text.replace("-", "")
@@ -268,7 +279,7 @@ def scan_interfaces(param="Q"):
         else:
             command = [f'echo "{param}" | kvas vpn set | grep "Интерфейс"']
         with tempfile.TemporaryFile() as tempf:
-            process = subprocess.Popen(command, shell=True, stdout=tempf)
+            process = subprocess.Popen(if_docker(command), shell=True, stdout=tempf)
             process.wait()
             tempf.seek(0)
             output = tempf.read().decode("utf-8")
@@ -315,7 +326,7 @@ def vless(url):
         dict_result = {**dict_str, **dict_netloc}
         get_routerip = '/opt/sbin/ip a | grep ": br0:" -A4 | grep "inet " | tr -s " " | cut -d" " -f3 | cut -d"/" -f1'
         routerip = (
-            str(subprocess.check_output(get_routerip, shell=True))
+            str(subprocess.check_output(if_docker(get_routerip), shell=True))
             .replace("b", "")
             .replace("'", "")
             .replace("\n", "")
@@ -451,8 +462,8 @@ def handle_vpn_set(call):
 def handle_install_xray(message: types.Message):
     try:
         logger.info("User %s is installing XRay", message.from_user.username)
-        os.system("mkdir /opt/etc/xray")
-        os.system("touch /opt/etc/xray/config.json")
+        os.system(if_docker("mkdir /opt/etc/xray"))
+        os.system(if_docker("touch /opt/etc/xray/config.json"))
         vless(message.text)
 
         bot.send_message(
@@ -462,17 +473,17 @@ def handle_install_xray(message: types.Message):
 
         subprocess.Popen(
             [
-                "sed",
+                if_docker("sed",
                 "-i",
                 '\'s/"L2TP"/"L2TP","Proxy"/',
-                "/opt/apps/kvas/bin/libs/vpn",
+                "/opt/apps/kvas/bin/libs/vpn"),
             ]
         ).wait()
 
         with tempfile.TemporaryFile() as tempf:
             process = subprocess.Popen(
                 [
-                    "curl -o /opt/script-xray.sh https://raw.githubusercontent.com/dnstkrv/telegram4kvas/main/script/script-xray.sh && sh /opt/script-xray.sh -install && rm /opt/script-xray.sh"
+                    if_docker("curl -o /opt/script-xray.sh https://raw.githubusercontent.com/dnstkrv/telegram4kvas/main/script/script-xray.sh && sh /opt/script-xray.sh -install && rm /opt/script-xray.sh")
                 ],
                 shell=True,
                 stdout=tempf,
@@ -499,7 +510,7 @@ def uninstall_xray(message: types.Message):
         with tempfile.TemporaryFile() as tempf:
             process = subprocess.Popen(
                 [
-                    "curl -o /opt/script-xray.sh https://raw.githubusercontent.com/dnstkrv/telegram4kvas/main/script/script-xray.sh && sh /opt/script-xray.sh -uninstall && rm /opt/script-xray.sh"
+                    if_docker("curl -o /opt/script-xray.sh https://raw.githubusercontent.com/dnstkrv/telegram4kvas/main/script/script-xray.sh && sh /opt/script-xray.sh -uninstall && rm /opt/script-xray.sh")
                 ],
                 shell=True,
                 stdout=tempf,
@@ -535,7 +546,7 @@ def handle_add_host(message: types.Message):
         domain_list = message.text.split()
         for domain in domain_list:
             with tempfile.TemporaryFile() as tempf:
-                process = subprocess.Popen(["kvas", "add", domain, "yes"], stdout=tempf)
+                process = subprocess.Popen([if_docker(f"kvas add {domain} yes")], shell = True, stdout=tempf)
                 process.wait()
                 tempf.seek(0)
                 output = tempf.read().decode("utf-8")
@@ -569,7 +580,7 @@ def handle_delete_host(message: types.Message):
         domain_list = message.text.split()
         for domain in domain_list:
             with tempfile.TemporaryFile() as tempf:
-                process = subprocess.Popen(["kvas", "del", domain], stdout=tempf)
+                process = subprocess.Popen([if_docker(f"kvas del {domain}")], shell = True, stdout=tempf)
                 process.wait()
                 tempf.seek(0)
                 output = tempf.read().decode("utf-8")
@@ -626,7 +637,7 @@ def remove_all_hosts(message: types.Message):
     try:
         logger.info("User %s is removing all hosts", message.from_user.username)
         with tempfile.TemporaryFile() as tempf:
-            subprocess.Popen(['echo "Y" | kvas purge'], shell=True, stdout=tempf).wait()
+            subprocess.Popen([if_docker('echo "Y" | kvas purge')], shell=True, stdout=tempf).wait()
             tempf.seek(0)
             output = clean_string(
                 tempf.read()
@@ -637,8 +648,17 @@ def remove_all_hosts(message: types.Message):
                 message.chat.id, mcode("\n" + output + "\n"), parse_mode="MarkdownV2"
             )
 
-        backup_file = InputFile("/opt/etc/.kvas/backup/hosts.list")
-        bot.send_document(message.chat.id, backup_file)
+        flag_docker = telegram_bot_config.flag_docker
+        if flag_docker == True:
+            subprocess.Popen(
+                [if_docker(
+                    f'curl -F document=@"/opt/etc/.kvas/backup/hosts.list" https://api.telegram.org/bot{telegram_bot_config.token}/sendDocument?chat_id={message.chat.id}'
+                )], shell = True,
+            )
+        else:
+            backup_file = InputFile("/opt/etc/.kvas/backup/hosts.list")
+            bot.send_document(message.chat.id, backup_file)
+        
     except Exception as e:
         logger.exception("Error in remove_all_hosts: %s", str(e))
         bot.send_message(message.chat.id, "Произошла ошибка при удалении всех хостов.")
@@ -665,17 +685,30 @@ def handle_import(message: types.Message):
         file_info = bot.get_file(message.document.file_id)
         downloaded_file = bot.download_file(file_info.file_path)
         src = "/opt/kvastelegram.import"
-        with open(src, "wb") as file_import:
+        src_docker = "./kvastelegram.import"
+
+        flag_docker = telegram_bot_config.flag_docker
+        if flag_docker == True:
+            router_ip = telegram_bot_config.router_ip
+            router_port = telegram_bot_config.router_port
+            router_password = telegram_bot_config.router_password
+            with open(src_docker, "wb") as file_import:
+                file_import.write(downloaded_file)
+            subprocess.Popen([if_docker(f"scp -P {router_ip} {src_docker} root@{router_ip}:/{src}")], shell = True)
+        else:
+            with open(src, "wb") as file_import:
             file_import.write(downloaded_file)
 
         with tempfile.TemporaryFile() as tempf:
-            subprocess.Popen(["kvas", "import", src], stdout=tempf).wait()
+            subprocess.Popen([if_docker(f"kvas import {src}")], shell=True, stdout=tempf).wait()
             tempf.seek(0)
             output = clean_string(tempf.read().decode("utf-8"))
             send_long_message(output, message)
 
         os.system(
-            "awk 'NF > 0' /opt/etc/hosts.list > /opt/etc/hostsb.list && cp /opt/etc/hostsb.list /opt/etc/hosts.list && rm /opt/etc/hostsb.list"
+            if_docker(
+                "awk 'NF > 0' /opt/etc/hosts.list > /opt/etc/hostsb.list && cp /opt/etc/hostsb.list /opt/etc/hosts.list && rm /opt/etc/hostsb.list"
+            )
         )
     except Exception as e:
         logger.exception("Error in handle_import: %s", str(e))
@@ -687,8 +720,20 @@ def export_hosts(message: types.Message):
     try:
         logger.info("User %s requested to export hosts", message.from_user.username)
         src = "/opt/etc/.kvas/backup/kvas_export.txt"
-        subprocess.Popen(["kvas", "export", src]).wait()
-        bot.send_document(message.chat.id, open(src, "rb"))
+        subprocess.Popen([if_docker(f"kvas export {src}")], shell= True).wait()
+
+        flag_docker = telegram_bot_config.flag_docker
+        if flag_docker == True:
+            subprocess.Popen(
+                [if_docker(
+                    f'curl -F document=@"{src}" https://api.telegram.org/bot{telegram_bot_config.token}/sendDocument?chat_id={message.chat.id}'
+                )], shell = True,
+            )
+        else:
+            bot.send_document(message.chat.id, open(src, "rb"))
+
+        
+        
     except Exception as e:
         logger.exception("Error in export_hosts: %s", str(e))
         bot.send_message(message.chat.id, "Произошла ошибка при экспорте хостов.")
@@ -702,7 +747,7 @@ def reboot_router(message: types.Message):
         )
         bot.send_message(message.chat.id, "Роутер перезагружается")
         logger.warning("Rebooting the router...")
-        subprocess.Popen(["reboot"])
+        subprocess.Popen([if_docker("reboot")])
     except Exception as e:
         logger.exception("Error in reboot_router: %s", str(e))
         bot.send_message(message.chat.id, "Произошла ошибка при перезагрузке роутера.")
@@ -739,7 +784,7 @@ def custom_command(message: types.Message):
             )
         else:
             with tempfile.TemporaryFile() as tempf:
-                output_proc = subprocess.Popen([message.text], shell=True, stdout=tempf)
+                output_proc = subprocess.Popen([ifdocker(message.text)], shell=True, stdout=tempf)
                 output_proc.wait()
                 tempf.seek(0)
                 output = tempf.read().decode("utf-8")
@@ -756,14 +801,14 @@ def run_test(message: types.Message):
         bot.send_message(message.chat.id, "Тест запущен, ожидайте несколько минут")
         subprocess.Popen(
             [
-                "sed",
+                if_docker("sed",
                 "-i",
                 "/\tipset_site_visit_check/s/^/#\ /",
-                "/opt/apps/kvas/bin/libs/check",
+                "/opt/apps/kvas/bin/libs/check"),
             ]
         ).wait()
         with tempfile.TemporaryFile() as tempf:
-            test_proc = subprocess.Popen(["kvas", "test"], stdout=tempf)
+            test_proc = subprocess.Popen([if_docker("kvas test")], shell = True, stdout=tempf)
             test_proc.wait()
             tempf.seek(0)
             output = clean_string(tempf.read().decode("utf-8"))
@@ -782,9 +827,19 @@ def run_debug(message: types.Message):
             f"Запущена команда {mcode('kvas debug')}",
             parse_mode="MarkdownV2",
         )
-        subprocess.Popen(["kvas", "debug", "/opt/root/kvas.debug"]).wait()
-        debug_file = InputFile("/opt/root/kvas.debug")
-        bot.send_document(message.chat.id, debug_file, parse_mode="MarkdownV2")
+        subprocess.Popen([if_docker("kvas debug /opt/root/kvas.debug")], shell = True).wait()
+
+        flag_docker = telegram_bot_config.flag_docker
+        if flag_docker == True:
+            subprocess.Popen(
+                [if_docker(
+                    f'curl -F document=@"/opt/root/kvas.debug" https://api.telegram.org/bot{telegram_bot_config.token}/sendDocument?chat_id={message.chat.id}'
+                )], shell = True,
+            )
+        else:
+            debug_file = InputFile("/opt/root/kvas.debug")
+            bot.send_document(message.chat.id, debug_file, parse_mode="MarkdownV2")
+
     except Exception as e:
         logger.exception("Error in run_debug: %s", str(e))
         bot.send_message(message.chat.id, "Произошла ошибка при запуске debug.")
@@ -800,7 +855,7 @@ def run_reset(message: types.Message):
             parse_mode="MarkdownV2",
         )
         with tempfile.TemporaryFile() as tempf:
-            reset_proc = subprocess.Popen(["kvas", "reset"], stdout=tempf)
+            reset_proc = subprocess.Popen([if_docker("kvas reset")], stdout=tempf)
             reset_proc.wait()
             tempf.seek(0)
             output = clean_string(tempf.read().decode("utf-8"))
@@ -833,7 +888,9 @@ def update_bot(message: types.Message):
             if changelog:
                 send_long_message(changelog, message)
             os.system(
-            "curl -o /opt/upgrade.sh https://raw.githubusercontent.com/dnstkrv/telegram4kvas/main/upgrade.sh && sh /opt/upgrade.sh && rm /opt/upgrade.sh"
+                if_docker(
+                    "curl -o /opt/upgrade.sh https://raw.githubusercontent.com/dnstkrv/telegram4kvas/main/upgrade.sh && sh /opt/upgrade.sh && rm /opt/upgrade.sh"
+                )
             )
             bot.send_message(message.chat.id, "Запущено обновление бота")
         else:
@@ -861,7 +918,7 @@ if __name__ == "__main__":
     try:
         bot.setup_middleware(Middleware())
         bot_me = bot.get_me()
-        os.system(f"logger -s -t telegram4kvas Bot @{bot_me.username} running...")
+        os.system(if_docker(f"logger -s -t telegram4kvas Bot @{bot_me.username} running..."))
         logger.info("Bot @%s running", bot_me.username)
         bot.infinity_polling(skip_pending=True, timeout=60)
     except Exception as e:
